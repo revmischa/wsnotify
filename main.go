@@ -9,14 +9,41 @@ import (
     "net/http"
 )
 
-type Client struct {
-    io.ReadWriteCloser 
-    done chan bool 
+type client struct {
+    io.ReadWriteCloser
+	send chan []byte
+	done chan bool
 }
 
-// figure out a better way to keep track of clients
-var globalClients = make(map[string]*Client)
+type notifier struct {
+	// Registered connections.
+	connections map[*client]bool
 
+	// Notifs
+	broadcast chan []byte
+
+	// Register requests from the connections.
+	register chan *client
+
+    // Unregister requests from connections.
+    unregister chan *client
+}
+
+func (n *notifier) run() {
+    for {
+        select {
+		case c := <-n.register:
+			n.connections[c] = true
+		case c := <-n.unregister:
+			delete(n.connections, c)
+			close(c.send)
+		case m := <-n.broadcast:
+			for c := range n.connections {
+				c.send <- m
+			}
+		}
+	}
+}
 
 func pglistener(db *sql.DB, messages chan string) {
     notifications, err := db.Query("LISTEN mychan")
@@ -42,49 +69,35 @@ func pglistener(db *sql.DB, messages chan string) {
     close(messages)
 }
 
-func notifier(db *sql.DB) {
-    for i := 0; i < 10; i++ {
-        // WARNING: Postgres does not appear to support parameterized notifications
-        //          like "NOTIFY mychan, $1". Be careful not to expose SQL injection!
-        query := fmt.Sprintf("NOTIFY mychan, 'message-%d'", i)
-        if _, err := db.Exec(query); err != nil {
-            fmt.Printf("error sending NOTIFY: %s\n", err)
-        }
-    }
+func notify(db *sql.DB) {
+	for i := 0; i < 10; i++ {
+		// WARNING: Postgres does not appear to support parameterized notifications
+		//          like "NOTIFY mychan, $1". Be careful not to expose SQL injection!
+		query := fmt.Sprintf("NOTIFY mychan, 'message-%d'", i)
+		if _, err := db.Exec(query); err != nil {
+			fmt.Printf("error sending NOTIFY: %s\n", err)
+		}
+	}
 }
 
 func newClientHandler(ws *websocket.Conn) {
-    msg := []byte("foo")
-    ws.Write(msg)
 }
 
-func startServer(){
-    fmt.Println("Listening")
-    http.Handle("/echo", websocket.Handler(newClientHandler))
-    err := http.ListenAndServe(":8080", nil)
-    if err != nil {
-        panic("ListenAndServe: " + err.Error())
-    }
+func startServer() {
+	fmt.Println("Listening")
+	http.Handle("/echo", websocket.Handler(newClientHandler))
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		panic("ListenAndServe: " + err.Error())
+	}
 }
 
 func main() {
-    db, err := sql.Open("libpq", "") // assuming localhost, user ok, etc
-    if err != nil {
-        fmt.Printf("could not connect to postgres: %s\n", err)
-        return
-    }
-    defer db.Close()
-    go startServer()
-    /*messages := make(chan string)
-    var wg sync.WaitGroup
-    wg.Add(1)
-    go pglistener(db, messages, &wg)
-
-    // wait until LISTEN was issued, then spawn notifier goroutine
-    wg.Wait()
-    go notifier(db)
-
-    for i := 0; i < 10; i++ {
-        fmt.Printf("received notification %s\n", <-messages)
-    }*/
+	db, err := sql.Open("libpq", "") // assuming localhost, user ok, etc
+	if err != nil {
+		fmt.Printf("could not connect to postgres: %s\n", err)
+		return
+	}
+	defer db.Close()
+	startServer()
 }
