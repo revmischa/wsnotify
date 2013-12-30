@@ -1,16 +1,16 @@
 package main
 
 import (
-    "database/sql"
-    "fmt"
-    "io"
-    _ "github.com/jgallagher/go-libpq"
-    "code.google.com/p/go.net/websocket"
-    "net/http"
+	"code.google.com/p/go.net/websocket"
+	"database/sql"
+	"fmt"
+	_ "github.com/jgallagher/go-libpq"
+	"io"
+	"net/http"
 )
 
 type client struct {
-    io.ReadWriteCloser
+	io.ReadWriteCloser
 	send chan []byte
 	done chan bool
 }
@@ -25,13 +25,13 @@ type notifier struct {
 	// Register requests from the connections.
 	register chan *client
 
-    // Unregister requests from connections.
-    unregister chan *client
+	// Unregister requests from connections.
+	unregister chan *client
 }
 
 func (n *notifier) run() {
-    for {
-        select {
+	for {
+		select {
 		case c := <-n.register:
 			n.connections[c] = true
 		case c := <-n.unregister:
@@ -46,27 +46,27 @@ func (n *notifier) run() {
 }
 
 func pglistener(db *sql.DB, messages chan string) {
-    notifications, err := db.Query("LISTEN mychan")
-    if err != nil {
-        fmt.Printf("Could not listen to mychan: %s\n", err)
-        close(messages)
-        return
-    }
-    defer notifications.Close()
+	notifications, err := db.Query("LISTEN mychan")
+	if err != nil {
+		fmt.Printf("Could not listen to mychan: %s\n", err)
+		close(messages)
+		return
+	}
+	defer notifications.Close()
 
-    // tell main() it's okay to spawn the pgnotifier goroutine
+	// tell main() it's okay to spawn the pgnotifier goroutine
 
-    var msg string
-    for notifications.Next() {
-        if err = notifications.Scan(&msg); err != nil {
-            fmt.Printf("Error while scanning: %s\n", err)
-            continue
-        }
-        messages <- msg
-    }
+	var msg string
+	for notifications.Next() {
+		if err = notifications.Scan(&msg); err != nil {
+			fmt.Printf("Error while scanning: %s\n", err)
+			continue
+		}
+		messages <- msg
+	}
 
-    fmt.Printf("Lost database connection ?!")
-    close(messages)
+	fmt.Printf("Lost database connection ?!")
+	close(messages)
 }
 
 func notify(db *sql.DB) {
