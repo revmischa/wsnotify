@@ -1,16 +1,15 @@
 package main
 
 import (
-	"code.google.com/p/go.net/websocket"
+    "code.google.com/p/go.net/websocket"
 	"database/sql"
 	"fmt"
 	_ "github.com/jgallagher/go-libpq"
-	"io"
 	"net/http"
 )
 
 type client struct {
-	io.ReadWriteCloser
+    ws websocket.Conn	
 	send chan []byte
 	done chan bool
 }
@@ -29,6 +28,22 @@ type notifier struct {
 	unregister chan *client
 }
 
+var n = notifier{
+    broadcast: make(chan []byte),
+    register: make(chan *client),
+    unregister: make(chan *client),
+    connections: make(map[*client]bool),
+}
+
+func (c *client) writer() {
+    for message := range c.send {
+        err := websocket.JSON.Send(&c.ws, message)
+        if err != nil {
+            break
+        }
+    }
+    c.ws.Close()
+}
 func (n *notifier) run() {
 	for {
 		select {
@@ -81,6 +96,10 @@ func notify(db *sql.DB) {
 }
 
 func newClientHandler(ws *websocket.Conn) {
+    c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
+    n.register <- c
+    defer func() { n.unregister <- c }()
+    c.writer()
 }
 
 func startServer() {
