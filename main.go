@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/jgallagher/go-libpq"
 	"net/http"
+    "sync"
 )
 
 type client struct {
@@ -26,6 +27,9 @@ type notifier struct {
 
 	// Unregister requests from connections.
 	unregister chan *client
+
+    //Last message sent for newly connecting clients
+    lastMessage []byte
 }
 
 var n = notifier{
@@ -33,11 +37,12 @@ var n = notifier{
     register: make(chan *client),
     unregister: make(chan *client),
     connections: make(map[*client]bool),
+    lastMessage: make([]byte, 0),
 }
 
 func (c *client) writer() {
     for message := range c.send {
-        err := websocket.JSON.Send(&c.ws, message)
+        _, err := c.ws.Write(message)
         if err != nil {
             break
         }
@@ -49,6 +54,10 @@ func (n *notifier) run() {
 		select {
 		case c := <-n.register:
 			n.connections[c] = true
+            if (len(n.lastMessage) > 0){
+                fmt.Println(string(n.lastMessage))
+                c.send <- n.lastMessage
+            }
 		case c := <-n.unregister:
 			delete(n.connections, c)
 			close(c.send)
@@ -56,32 +65,34 @@ func (n *notifier) run() {
 			for c := range n.connections {
 				c.send <- m
 			}
+            n.lastMessage = m
+            fmt.Println(string(n.lastMessage))
 		}
 	}
 }
 
-func pglistener(db *sql.DB, messages chan string) {
+func (n *notifier) pglistener(db *sql.DB, wg *sync.WaitGroup) {
 	notifications, err := db.Query("LISTEN mychan")
 	if err != nil {
 		fmt.Printf("Could not listen to mychan: %s\n", err)
-		close(messages)
 		return
 	}
 	defer notifications.Close()
 
+	wg.Done()
 	// tell main() it's okay to spawn the pgnotifier goroutine
 
 	var msg string
 	for notifications.Next() {
+        fmt.Println("got a notification")
 		if err = notifications.Scan(&msg); err != nil {
 			fmt.Printf("Error while scanning: %s\n", err)
 			continue
 		}
-		messages <- msg
+		n.broadcast <- []byte(msg)
 	}
 
 	fmt.Printf("Lost database connection ?!")
-	close(messages)
 }
 
 func notify(db *sql.DB) {
@@ -93,18 +104,27 @@ func notify(db *sql.DB) {
 			fmt.Printf("error sending NOTIFY: %s\n", err)
 		}
 	}
+    fmt.Println("exiting notify")
 }
 
 func newClientHandler(ws *websocket.Conn) {
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
     n.register <- c
+    c.ws.Write([]byte("Hello"))
     defer func() { n.unregister <- c }()
+    fmt.Print("got here")
     c.writer()
 }
 
-func startServer() {
+func startServer(db *sql.DB) {
 	fmt.Println("Listening")
 	http.Handle("/echo", websocket.Handler(newClientHandler))
+	var wg sync.WaitGroup
+	wg.Add(1)
+    go n.pglistener(db, &wg)
+    go n.run()
+    wg.Wait()
+    notify(db)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
@@ -118,5 +138,5 @@ func main() {
 		return
 	}
 	defer db.Close()
-	startServer()
+	startServer(db)
 }
