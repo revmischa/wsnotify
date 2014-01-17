@@ -15,29 +15,40 @@ type client struct {
 	done chan bool
 }
 
-type notifier struct {
+type publisher struct {
 	// Registered connections.
-	connections map[*client]bool
+	subscribers map[*client]bool
 
 	// Notifs
-	broadcast chan []byte
+	publish chan []byte
 
 	// Register requests from the connections.
-	register chan *client
+	subscribe chan *client
 
 	// Unregister requests from connections.
-	unregister chan *client
+	unsubscribe chan *client
 
     //Last message sent for newly connecting clients
     lastMessage []byte
+
+    name string
+    db *sql.DB
 }
 
-var n = notifier{
-    broadcast: make(chan []byte),
-    register: make(chan *client),
-    unregister: make(chan *client),
-    connections: make(map[*client]bool),
-    lastMessage: make([]byte, 0),
+func newPublisher(db *sql.DB, name string) *publisher {
+    p := publisher {
+        subscribers: make(map [*client]bool),
+        publish: make(chan []byte),
+        subscribe: make(chan *client),
+        unsubscribe: make(chan *client),
+        lastMessage: make([]byte, 0),
+        name: name,
+        db: db,
+    }
+    go p.run()
+    go p.pgListen()
+
+    return &p 
 }
 
 func (c *client) writer() {
@@ -49,37 +60,38 @@ func (c *client) writer() {
     }
     c.ws.Close()
 }
-func (n *notifier) run() {
+func (p *publisher) run() {
 	for {
 		select {
-		case c := <-n.register:
-			n.connections[c] = true
-            if (len(n.lastMessage) > 0){
-                fmt.Println(string(n.lastMessage))
-                c.send <- n.lastMessage
+		case c := <-p.subscribe:
+			p.subscribers[c] = true
+            if (len(p.lastMessage) > 0){
+                fmt.Println(string(p.lastMessage))
+                c.send <- p.lastMessage
             }
-		case c := <-n.unregister:
-			delete(n.connections, c)
+		case c := <-p.unsubscribe:
+			delete(p.subscribers, c)
 			close(c.send)
-		case m := <-n.broadcast:
-			for c := range n.connections {
+		case m := <-p.publish:
+			for c := range p.subscribers {
 				c.send <- m
 			}
-            n.lastMessage = m
-            fmt.Println(string(n.lastMessage))
+            p.lastMessage = m
+            fmt.Println(string(p.lastMessage))
 		}
 	}
 }
 
-func (n *notifier) pglistener(db *sql.DB, wg *sync.WaitGroup) {
-	notifications, err := db.Query("LISTEN mychan")
+func (p *publisher) pgListen() {
+	notifications, err := p.db.Query("LISTEN " + p.name)
 	if err != nil {
 		fmt.Printf("Could not listen to mychan: %s\n", err)
 		return
 	}
 	defer notifications.Close()
 
-	wg.Done()
+	//wg.Done()
+
 	// tell main() it's okay to spawn the pgnotifier goroutine
 
 	var msg string
@@ -89,14 +101,14 @@ func (n *notifier) pglistener(db *sql.DB, wg *sync.WaitGroup) {
 			fmt.Printf("Error while scanning: %s\n", err)
 			continue
 		}
-		n.broadcast <- []byte(msg)
+		p.publish <- []byte(msg)
 	}
 
 	fmt.Printf("Lost database connection ?!")
 }
 
 func notify(db *sql.DB) {
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1000; i++ {
 		// WARNING: Postgres does not appear to support parameterized notifications
 		//          like "NOTIFY mychan, $1". Be careful not to expose SQL injection!
 		query := fmt.Sprintf("NOTIFY mychan, 'message-%d'", i)
@@ -120,10 +132,10 @@ func startServer(db *sql.DB) {
 	fmt.Println("Listening")
 	http.Handle("/echo", websocket.Handler(newClientHandler))
 	var wg sync.WaitGroup
-	wg.Add(1)
+	//wg.Add(1)
     go n.pglistener(db, &wg)
     go n.run()
-    wg.Wait()
+    //wg.Wait()
     notify(db)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
