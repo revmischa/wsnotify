@@ -6,7 +6,7 @@ import (
 	"fmt"
 	_ "github.com/jgallagher/go-libpq"
 	"net/http"
-    "sync"
+    //"sync"
 )
 
 type client struct {
@@ -31,8 +31,18 @@ type publisher struct {
     //Last message sent for newly connecting clients
     lastMessage []byte
 
-    name string
     db *sql.DB
+
+    name string
+}
+
+//I don't like globals
+//think about a way to get rid of this
+var publishers = struct {
+    m map[string]*publisher
+    db *sql.DB
+}{
+    m: make(map[string]*publisher),
 }
 
 func newPublisher(db *sql.DB, name string) *publisher {
@@ -45,10 +55,19 @@ func newPublisher(db *sql.DB, name string) *publisher {
         name: name,
         db: db,
     }
+    publishers.m[name] = &p
     go p.run()
     go p.pgListen()
 
     return &p 
+}
+
+func (c *client) reader(){
+    //takes messages, probably mostly for requesting to subscriptions
+    message := make([]byte, 256);
+    for {
+       c.ws.Read(message) 
+    }
 }
 
 func (c *client) writer() {
@@ -60,6 +79,7 @@ func (c *client) writer() {
     }
     c.ws.Close()
 }
+
 func (p *publisher) run() {
 	for {
 		select {
@@ -108,10 +128,11 @@ func (p *publisher) pgListen() {
 }
 
 func notify(db *sql.DB) {
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100000; i++ {
 		// WARNING: Postgres does not appear to support parameterized notifications
 		//          like "NOTIFY mychan, $1". Be careful not to expose SQL injection!
-		query := fmt.Sprintf("NOTIFY mychan, 'message-%d'", i)
+		query := fmt.Sprintf("NOTIFY testName, 'message-%d'", i)
+        fmt.Println(query)
 		if _, err := db.Exec(query); err != nil {
 			fmt.Printf("error sending NOTIFY: %s\n", err)
 		}
@@ -121,22 +142,28 @@ func notify(db *sql.DB) {
 
 func newClientHandler(ws *websocket.Conn) {
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
-    n.register <- c
-    c.ws.Write([]byte("Hello"))
-    defer func() { n.unregister <- c }()
-    fmt.Print("got here")
+    c.ws.Write([]byte("channelName?"))
+    
+    pgChanName := make([]byte, 256) 
+    c.ws.Read(pgChanName);
+    p := publishers.m[string(pgChanName)]
+    
+    if (p == nil) {
+        p = newPublisher(publishers.db, string(pgChanName))
+    }
+    
+    
+    p.subscribe <- c
+
+    c.ws.Write([]byte("now subscribed to channel " + string(pgChanName)))
+    defer func() { p.unsubscribe <- c }()
     c.writer()
 }
 
 func startServer(db *sql.DB) {
 	fmt.Println("Listening")
-	http.Handle("/echo", websocket.Handler(newClientHandler))
-	var wg sync.WaitGroup
-	//wg.Add(1)
-    go n.pglistener(db, &wg)
-    go n.run()
-    //wg.Wait()
-    notify(db)
+	http.Handle("/wsnotify", websocket.Handler(newClientHandler))
+    go notify(db)
 	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
@@ -149,6 +176,7 @@ func main() {
 		fmt.Printf("could not connect to postgres: %s\n", err)
 		return
 	}
+    publishers.db = db
 	defer db.Close()
 	startServer(db)
 }
