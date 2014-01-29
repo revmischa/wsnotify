@@ -144,18 +144,19 @@ func newClientHandler(ws *websocket.Conn) {
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
     c.ws.Write([]byte("channelName?"))
     
-    pgChanName := make([]byte, 256) 
-    c.ws.Read(pgChanName);
-    p := publishers.m[string(pgChanName)]
+    pgChanNameBuff := make([]byte, 256) 
+    c.ws.Read(pgChanNameBuff);
+
+    pgChanName := string(pgChanNameBuff);
+    p := publishers.m[pgChanName]
     
     if (p == nil) {
-        p = newPublisher(publishers.db, string(pgChanName))
+        p = newPublisher(publishers.db, pgChanName)
     }
-    
-    
+
     p.subscribe <- c
 
-    c.ws.Write([]byte("now subscribed to channel " + string(pgChanName)))
+    c.ws.Write([]byte("now subscribed to channel " + pgChanName))
     defer func() { p.unsubscribe <- c }()
     c.writer()
 }
