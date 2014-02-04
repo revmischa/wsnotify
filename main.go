@@ -6,6 +6,8 @@ import (
 	"fmt"
 	_ "github.com/jgallagher/go-libpq"
 	"net/http"
+    "launchpad.net/goyaml"
+    "io/ioutil"
     //"sync"
 )
 
@@ -165,14 +167,23 @@ func startServer(db *sql.DB) {
 	fmt.Println("Listening")
 	http.Handle("/wsnotify", websocket.Handler(newClientHandler))
     go notify(db)
-	err := http.ListenAndServe(":8080", nil)
+	err := http.ListenAndServe(":11002", nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
 	}
 }
 
+type DBconfig struct {
+    User string
+    DBname string
+}
+
 func main() {
-	db, err := sql.Open("libpq", "") // assuming localhost, user ok, etc
+    configFile, _ := ioutil.ReadFile("config.yaml") 
+    var config DBconfig;
+    goyaml.Unmarshal(configFile, &config)
+    configString := "user=" + config.User + " dbname=" + config.DBname
+    db, err := sql.Open("libpq", configString) // assuming localhost, user ok, etc
 	if err != nil {
 		fmt.Printf("could not connect to postgres: %s\n", err)
 		return
