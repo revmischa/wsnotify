@@ -1,2 +1,3 @@
 user: postgres
 dbname: mwdev
+port: 11002

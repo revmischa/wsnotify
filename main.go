@@ -170,11 +170,11 @@ func newClientHandler(ws *websocket.Conn) {
     c.writer()
 }
 
-func startServer(db *sql.DB) {
+func startServer(db *sql.DB, port string) {
 	fmt.Println("Listening")
 	http.Handle("/wsnotify/", websocket.Handler(newClientHandler))
     //go notify(db)
-	err := http.ListenAndServe(":11002", nil)
+	err := http.ListenAndServe(":" + port, nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
 	}
@@ -183,6 +183,7 @@ func startServer(db *sql.DB) {
 type DBconfig struct {
     User string
     DBname string
+    Port string
 }
 
 func main() {
@@ -197,5 +198,5 @@ func main() {
 	}
     publishers.db = db
 	defer db.Close()
-	startServer(db)
+	startServer(db, config.Port)
 }
