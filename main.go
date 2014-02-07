@@ -8,6 +8,7 @@ import (
 	"net/http"
     "launchpad.net/goyaml"
     "io/ioutil"
+    "strings"
     //"sync"
 )
 
@@ -143,13 +144,19 @@ func notify(db *sql.DB) {
 }
 
 func newClientHandler(ws *websocket.Conn) {
+    path := ws.Request().URL.Path
+    fmt.Println(path)
+    pathParts := strings.Split(path, "/")
+    pgChanName := pathParts[len(pathParts) -1]
+    fmt.Println(pgChanName)
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
-    c.ws.Write([]byte("channelName?"))
+    /*c.ws.Write([]byte("channelName?"))
     
     pgChanNameBuff := make([]byte, 256) 
     c.ws.Read(pgChanNameBuff);
 
     pgChanName := string(pgChanNameBuff);
+    */
     p := publishers.m[pgChanName]
     
     if (p == nil) {
@@ -165,8 +172,8 @@ func newClientHandler(ws *websocket.Conn) {
 
 func startServer(db *sql.DB) {
 	fmt.Println("Listening")
-	http.Handle("/wsnotify", websocket.Handler(newClientHandler))
-    go notify(db)
+	http.Handle("/wsnotify/", websocket.Handler(newClientHandler))
+    //go notify(db)
 	err := http.ListenAndServe(":11002", nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
