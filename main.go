@@ -1,15 +1,14 @@
 package main
 
 import (
-    "code.google.com/p/go.net/websocket"
-	"database/sql"
+    "github.com/garyburd/go-websocket/websocket"
 	"fmt"
-	_ "github.com/jgallagher/go-libpq"
+	"github.com/lib/pq"
 	"net/http"
     "launchpad.net/goyaml"
     "io/ioutil"
     "strings"
-    //"sync"
+    "time"
 )
 
 type client struct {
@@ -34,8 +33,6 @@ type publisher struct {
     //Last message sent for newly connecting clients
     lastMessage []byte
 
-    db *sql.DB
-
     name string
 }
 
@@ -43,12 +40,13 @@ type publisher struct {
 //think about a way to get rid of this
 var publishers = struct {
     m map[string]*publisher
-    db *sql.DB
 }{
     m: make(map[string]*publisher),
 }
 
-func newPublisher(db *sql.DB, name string) *publisher {
+var listener *pq.Listener
+
+func newPublisher(name string) *publisher {
     p := publisher {
         subscribers: make(map [*client]bool),
         publish: make(chan []byte),
@@ -56,30 +54,39 @@ func newPublisher(db *sql.DB, name string) *publisher {
         unsubscribe: make(chan *client),
         lastMessage: make([]byte, 0),
         name: name,
-        db: db,
     }
     publishers.m[name] = &p
     go p.run()
-    go p.pgListen()
 
     return &p 
 }
 
 func (c *client) reader(){
     //takes messages, probably mostly for requesting to subscriptions
-    message := make([]byte, 256);
     for {
-       c.ws.Read(message) 
+        mt, p, err := c.ws.ReadMessage() 
+        if err != nil {
+            fmt.Println(err.Error())
+            return
+        }
+        fmt.Println(mt, p)
     }
 }
 
 func (c *client) writer() {
-    for message := range c.send {
-        _, err := c.ws.Write(message)
-        if err != nil {
-            break
+    for {
+        select {
+        case message := <- c.send : 
+            err := c.ws.WriteMessage(websocket.TextMessage, message)
+            if err != nil {
+                fmt.Println("Error writing to websocket: " + err.Error())
+                break
+            }
+        case <-time.After(20 * time.Second):
+            c.ws.WriteMessage(websocket.PingMessage, []byte(""))
         }
     }
+    fmt.Println("exiting client writer")
     c.ws.Close()
 }
 
@@ -97,7 +104,13 @@ func (p *publisher) run() {
 			close(c.send)
 		case m := <-p.publish:
 			for c := range p.subscribers {
-				c.send <- m
+                select {
+                case c.send <- m:
+                default:
+                    delete(p.subscribers, c)
+                    close(c.send)
+                    go c.ws.Close()
+                }
 			}
             p.lastMessage = m
             fmt.Println(string(p.lastMessage))
@@ -105,80 +118,50 @@ func (p *publisher) run() {
 	}
 }
 
-func (p *publisher) pgListen() {
-	notifications, err := p.db.Query("LISTEN " + p.name)
-	if err != nil {
-		fmt.Printf("Could not listen to mychan: %s\n", err)
-		return
-	}
-	defer notifications.Close()
-
-	//wg.Done()
-
-	// tell main() it's okay to spawn the pgnotifier goroutine
-
-	var msg string
-	for notifications.Next() {
-        fmt.Println("got a notification")
-		if err = notifications.Scan(&msg); err != nil {
-			fmt.Printf("Error while scanning: %s\n", err)
-			continue
-		}
-		p.publish <- []byte(msg)
+func pgListen() {
+    for notif := range listener.Notify {
+        fmt.Println(notif.Channel)
+        fmt.Println(notif.Extra)
+		publishers.m[notif.Channel].publish <- []byte(notif.Extra)
 	}
 
 	fmt.Printf("Lost database connection ?!")
 }
 
-func notify(db *sql.DB) {
-	for i := 0; i < 100000; i++ {
-		// WARNING: Postgres does not appear to support parameterized notifications
-		//          like "NOTIFY mychan, $1". Be careful not to expose SQL injection!
-		query := fmt.Sprintf("NOTIFY testName, 'message-%d'", i)
-        fmt.Println(query)
-		if _, err := db.Exec(query); err != nil {
-			fmt.Printf("error sending NOTIFY: %s\n", err)
-		}
-	}
-    fmt.Println("exiting notify")
-}
-
-func newClientHandler(ws *websocket.Conn) {
-    path := ws.Request().URL.Path
+func newClientHandler(w http.ResponseWriter, r *http.Request) {
+    ws, err := websocket.Upgrade(w, r.Header, nil, 1024, 1024)
+    if _, ok := err.(websocket.HandshakeError); ok {
+        http.Error(w, "Not a websocket handshake", 400)
+        return
+    } else if err != nil {
+        fmt.Println(err)
+        return
+    }
+    path := r.URL.Path
     fmt.Println(path)
     pathParts := strings.Split(path, "/")
     pgChanName := pathParts[len(pathParts) -1]
     fmt.Println(pgChanName)
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
-    /*c.ws.Write([]byte("channelName?"))
-    
-    pgChanNameBuff := make([]byte, 256) 
-    c.ws.Read(pgChanNameBuff);
-
-    pgChanName := string(pgChanNameBuff);
-    */
     p := publishers.m[pgChanName]
     
+    go c.reader()
     if (p == nil) {
-        p = newPublisher(publishers.db, pgChanName)
+        p = newPublisher(pgChanName)
     }
 
     p.subscribe <- c
 
-    c.ws.Write([]byte("now subscribed to channel " + pgChanName))
-    defer func() { p.unsubscribe <- c }()
+    listener.Listen(pgChanName)
+    c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel " + pgChanName))
+    defer func() { 
+        listener.Unlisten(pgChanName)
+        p.unsubscribe <- c 
+        fmt.Println("Exiting client connection")
+    }()
     c.writer()
 }
 
-func startServer(db *sql.DB, port string) {
-	fmt.Println("Listening")
-	http.Handle("/wsnotify/", websocket.Handler(newClientHandler))
-    //go notify(db)
-	err := http.ListenAndServe(":" + port, nil)
-	if err != nil {
-		panic("ListenAndServe: " + err.Error())
-	}
-}
 
 type DBconfig struct {
     User string
@@ -190,13 +173,20 @@ func main() {
     configFile, _ := ioutil.ReadFile("config.yaml") 
     var config DBconfig;
     goyaml.Unmarshal(configFile, &config)
-    configString := "user=" + config.User + " dbname=" + config.DBname
-    db, err := sql.Open("libpq", configString) // assuming localhost, user ok, etc
+    configString := "user=" + config.User + " dbname=" + config.DBname  + " sslmode=disable"
+
+    reportProblem := func(ev pq.ListenerEventType, err error) {
+        if err != nil {
+            fmt.Println(err.Error())
+        }
+    }
+
+    listener = pq.NewListener(configString, 10 * time.Second, time.Minute, reportProblem)
+    go pgListen()
+	fmt.Println("Listening")
+	http.HandleFunc("/wsnotify/", newClientHandler)
+    err := http.ListenAndServe(":" + config.Port, nil)
 	if err != nil {
-		fmt.Printf("could not connect to postgres: %s\n", err)
-		return
+		panic("ListenAndServe: " + err.Error())
 	}
-    publishers.db = db
-	defer db.Close()
-	startServer(db, config.Port)
 }
