@@ -65,29 +65,35 @@ func (c *client) reader(){
     //takes messages, probably mostly for requesting to subscriptions
     for {
         mt, p, err := c.ws.ReadMessage() 
-        if err != nil {
-            fmt.Println(err.Error())
+        if err != nil  {
+            fmt.Println("client read error: ", err.Error())
             return
         }
-        fmt.Println(mt, p)
+        if mt == websocket.CloseMessage {
+            return
+        }
+        fmt.Println("type", mt, "message", p)
     }
 }
 
 func (c *client) writer() {
     for {
         select {
-        case message := <- c.send : 
+        case message, ok := <- c.send : 
+            if (! ok){
+                // the channel's been closed
+                break
+            }
             err := c.ws.WriteMessage(websocket.TextMessage, message)
             if err != nil {
-                fmt.Println("Error writing to websocket: " + err.Error())
-                break
+                fmt.Println("Error writing " + string(message) + " to websocket: " + err.Error())
+                break 
             }
         case <-time.After(20 * time.Second):
             c.ws.WriteMessage(websocket.PingMessage, []byte(""))
         }
     }
     fmt.Println("exiting client writer")
-    c.ws.Close()
 }
 
 func (p *publisher) run() {
@@ -97,10 +103,14 @@ func (p *publisher) run() {
 			p.subscribers[c] = true
             if (len(p.lastMessage) > 0){
                 fmt.Println(string(p.lastMessage))
-                c.send <- p.lastMessage
+                //c.send <- p.lastMessage
             }
 		case c := <-p.unsubscribe:
 			delete(p.subscribers, c)
+            if (len(p.subscribers) < 1) {
+                listener.Unlisten(p.name)
+                fmt.Println("stop listening to p.name")
+            }
 			close(c.send)
 		case m := <-p.publish:
 			for c := range p.subscribers {
@@ -145,7 +155,6 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
     c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
     p := publishers.m[pgChanName]
     
-    go c.reader()
     if (p == nil) {
         p = newPublisher(pgChanName)
     }
@@ -154,12 +163,12 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 
     listener.Listen(pgChanName)
     c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel " + pgChanName))
+    go c.writer()
     defer func() { 
-        listener.Unlisten(pgChanName)
         p.unsubscribe <- c 
         fmt.Println("Exiting client connection")
     }()
-    c.writer()
+    c.reader()
 }
 
 
