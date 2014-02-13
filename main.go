@@ -9,11 +9,13 @@ import (
     "io/ioutil"
     "strings"
     "time"
+    "database/sql"
 )
 
 type client struct {
     ws websocket.Conn	
 	send chan []byte
+    pgChan string
 	done chan bool
 }
 
@@ -30,9 +32,6 @@ type publisher struct {
 	// Unregister requests from connections.
 	unsubscribe chan *client
 
-    //Last message sent for newly connecting clients
-    lastMessage []byte
-
     name string
 }
 
@@ -45,6 +44,7 @@ var publishers = struct {
 }
 
 var listener *pq.Listener
+var db *sql.DB
 
 func newPublisher(name string) *publisher {
     p := publisher {
@@ -52,7 +52,6 @@ func newPublisher(name string) *publisher {
         publish: make(chan []byte),
         subscribe: make(chan *client),
         unsubscribe: make(chan *client),
-        lastMessage: make([]byte, 0),
         name: name,
     }
     publishers.m[name] = &p
@@ -72,28 +71,33 @@ func (c *client) reader(){
         if mt == websocket.CloseMessage {
             return
         }
+   /*     if mt == websocket.TextMessage {
+            q := "NOTIFY " + c.pgChan + ", '" + string(p) + "'"
+            fmt.Println("notifying folks: " + q)
+            db.Exec("NOTIFY bar, '?'", string(p))
+        } */
         fmt.Println("type", mt, "message", p)
     }
 }
 
 func (c *client) writer() {
+    defer fmt.Println("exiting client writer")
     for {
         select {
         case message, ok := <- c.send : 
             if (! ok){
                 // the channel's been closed
-                break
+               return 
             }
             err := c.ws.WriteMessage(websocket.TextMessage, message)
             if err != nil {
                 fmt.Println("Error writing " + string(message) + " to websocket: " + err.Error())
-                break 
+                return 
             }
         case <-time.After(20 * time.Second):
             c.ws.WriteMessage(websocket.PingMessage, []byte(""))
         }
     }
-    fmt.Println("exiting client writer")
 }
 
 func (p *publisher) run() {
@@ -101,10 +105,6 @@ func (p *publisher) run() {
 		select {
 		case c := <-p.subscribe:
 			p.subscribers[c] = true
-            if (len(p.lastMessage) > 0){
-                fmt.Println(string(p.lastMessage))
-                //c.send <- p.lastMessage
-            }
 		case c := <-p.unsubscribe:
 			delete(p.subscribers, c)
             if (len(p.subscribers) < 1) {
@@ -122,8 +122,6 @@ func (p *publisher) run() {
                     go c.ws.Close()
                 }
 			}
-            p.lastMessage = m
-            fmt.Println(string(p.lastMessage))
 		}
 	}
 }
@@ -132,7 +130,9 @@ func pgListen() {
     for notif := range listener.Notify {
         fmt.Println(notif.Channel)
         fmt.Println(notif.Extra)
-		publishers.m[notif.Channel].publish <- []byte(notif.Extra)
+        if (publishers.m[notif.Channel] != nil ){
+		    publishers.m[notif.Channel].publish <- []byte(notif.Extra)
+        }
 	}
 
 	fmt.Printf("Lost database connection ?!")
@@ -152,7 +152,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
     pathParts := strings.Split(path, "/")
     pgChanName := pathParts[len(pathParts) -1]
     fmt.Println(pgChanName)
-    c := &client{ *ws, make(chan []byte, 256), make(chan bool)}
+    c := &client{ *ws, make(chan []byte, 256), pgChanName, make(chan bool)}
     p := publishers.m[pgChanName]
     
     if (p == nil) {
@@ -177,15 +177,17 @@ type DBconfig struct {
     DBname string
     Port string
 }
-
 func main() {
     configFile, _ := ioutil.ReadFile("config.yaml") 
     var config DBconfig;
     goyaml.Unmarshal(configFile, &config)
     configString := "user=" + config.User + " dbname=" + config.DBname  + " sslmode=disable"
+    var err error
+    db, err = sql.Open("postgres", configString)
 
     reportProblem := func(ev pq.ListenerEventType, err error) {
         if err != nil {
+            fmt.Println("reportProblem error")
             fmt.Println(err.Error())
         }
     }
@@ -194,7 +196,7 @@ func main() {
     go pgListen()
 	fmt.Println("Listening")
 	http.HandleFunc("/wsnotify/", newClientHandler)
-    err := http.ListenAndServe(":" + config.Port, nil)
+    err = http.ListenAndServe(":" + config.Port, nil)
 	if err != nil {
 		panic("ListenAndServe: " + err.Error())
 	}
