@@ -181,7 +181,14 @@ type DBconfig struct {
     Host string
 }
 func main() {
-    configFile, _ := ioutil.ReadFile("config.yaml") 
+    var err error
+    configFile, err := ioutil.ReadFile("config.yaml") 
+    if err != nil {
+        configFile, err = ioutil.ReadFile("/etc/wsnotify/config.yaml")
+        if err != nil {
+            panic("could not find config file")
+        }
+    }
     var config DBconfig;
     goyaml.Unmarshal(configFile, &config)
     configString := "user=" + config.User + " dbname=" + config.DBname  + " sslmode=disable"
@@ -191,7 +198,6 @@ func main() {
     if (config.Password != "") {
         configString = configString + " password=" + config.Password
     }
-    var err error
     db, err = sql.Open("postgres", configString)
 
     reportProblem := func(ev pq.ListenerEventType, err error) {
