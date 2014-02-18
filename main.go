@@ -177,12 +177,20 @@ type DBconfig struct {
     User string
     DBname string
     Port string
+    Password string
+    Host string
 }
 func main() {
     configFile, _ := ioutil.ReadFile("config.yaml") 
     var config DBconfig;
     goyaml.Unmarshal(configFile, &config)
     configString := "user=" + config.User + " dbname=" + config.DBname  + " sslmode=disable"
+    if (config.Host != "") {
+        configString = configString + " host=" + config.Host
+    }
+    if (config.Password != "") {
+        configString = configString + " password=" + config.Password
+    }
     var err error
     db, err = sql.Open("postgres", configString)
 
