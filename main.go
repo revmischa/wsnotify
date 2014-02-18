@@ -61,9 +61,6 @@ func newPublisher(name string) *publisher {
 }
 
 func (c *client) reader(){
-    //takes messages, probably mostly for requesting to subscriptions
-    q := fmt.Sprintf("SELECT pg_notify('%s', $1)", c.pgChan)
-    fmt.Println(q)
     for {
         mt, p, err := c.ws.ReadMessage() 
         if err != nil  {
@@ -75,7 +72,7 @@ func (c *client) reader(){
         }
 
         if mt == websocket.TextMessage {
-            db.Exec(q, string(p))
+            db.Exec("SELECT pg_Notify($1, $2)", c.pgChan, string(p))
         } 
         fmt.Println("type", mt, "message", p)
     }
