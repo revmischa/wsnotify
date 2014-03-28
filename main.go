@@ -35,12 +35,42 @@ type publisher struct {
 	name string
 }
 
+type publisherRequest struct {
+	request  string
+	response chan *publisher
+}
+
 //I don't like globals
 //think about a way to get rid of this
 var publishers = struct {
-	m map[string]*publisher
+	m           map[string]*publisher
+	getOrCreate chan *publisherRequest
+	remove      chan string
 }{
-	m: make(map[string]*publisher),
+	m:           make(map[string]*publisher),
+	getOrCreate: make(chan *publisherRequest),
+	remove:      make(chan string),
+}
+
+func publishersDaemon() {
+	for {
+		select {
+		case r := <-publishers.getOrCreate:
+			p, ok := publishers.m[r.request]
+			if ok {
+                fmt.Println("think I found an existing publisher")
+				r.response <- p
+			} else {
+				newPub := newPublisher(r.request)
+				publishers.m[r.request] = newPub
+				listener.Listen(r.request)
+				r.response <- newPub 
+			}
+		case k := <-publishers.remove:
+            delete(publishers.m, k)
+            listener.Unlisten(k)
+		}
+	}
 }
 
 var listener *pq.Listener
@@ -99,17 +129,18 @@ func (c *client) writer() {
 }
 
 func (p *publisher) run() {
-	for {
+    running := true
+	for running {
 		select {
 		case c := <-p.subscribe:
 			p.subscribers[c] = true
 		case c := <-p.unsubscribe:
 			delete(p.subscribers, c)
-			if len(p.subscribers) < 1 {
-				listener.Unlisten(p.name)
-				fmt.Println("stop listening to p.name")
-			}
 			close(c.send)
+			if len(p.subscribers) < 1 {
+                publishers.remove <- p.name
+                running = false
+			}
 		case m := <-p.publish:
 			for c := range p.subscribers {
 				select {
@@ -151,15 +182,10 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 	pgChanName := pathParts[len(pathParts)-1]
 	fmt.Println(pgChanName)
 	c := &client{*ws, make(chan []byte, 256), pgChanName, make(chan bool)}
-	p := publishers.m[pgChanName]
-
-	if p == nil {
-		p = newPublisher(pgChanName)
-	}
-
+    pr := &publisherRequest{ request: pgChanName, response: make(chan *publisher),}
+    publishers.getOrCreate <- pr
+	p := <- pr.response
 	p.subscribe <- c
-
-	listener.Listen(pgChanName)
 	c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel "+pgChanName))
 	go c.writer()
 	defer func() {
@@ -203,7 +229,7 @@ func main() {
 			fmt.Println(err.Error())
 		}
 	}
-
+    go publishersDaemon()
 	listener = pq.NewListener(configString, 10*time.Second, time.Minute, reportProblem)
 	go pgListen()
 	fmt.Println("Listening")
