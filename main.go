@@ -58,17 +58,17 @@ func publishersDaemon() {
 		case r := <-publishers.getOrCreate:
 			p, ok := publishers.m[r.request]
 			if ok {
-                fmt.Println("think I found an existing publisher")
+				fmt.Println("think I found an existing publisher")
 				r.response <- p
 			} else {
 				newPub := newPublisher(r.request)
 				publishers.m[r.request] = newPub
 				listener.Listen(r.request)
-				r.response <- newPub 
+				r.response <- newPub
 			}
 		case k := <-publishers.remove:
-            delete(publishers.m, k)
-            listener.Unlisten(k)
+			delete(publishers.m, k)
+			listener.Unlisten(k)
 		}
 	}
 }
@@ -129,7 +129,7 @@ func (c *client) writer() {
 }
 
 func (p *publisher) run() {
-    running := true
+	running := true
 	for running {
 		select {
 		case c := <-p.subscribe:
@@ -138,8 +138,8 @@ func (p *publisher) run() {
 			delete(p.subscribers, c)
 			close(c.send)
 			if len(p.subscribers) < 1 {
-                publishers.remove <- p.name
-                running = false
+				publishers.remove <- p.name
+				running = false
 			}
 		case m := <-p.publish:
 			for c := range p.subscribers {
@@ -182,9 +182,9 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 	pgChanName := pathParts[len(pathParts)-1]
 	fmt.Println(pgChanName)
 	c := &client{*ws, make(chan []byte, 256), pgChanName, make(chan bool)}
-    pr := &publisherRequest{ request: pgChanName, response: make(chan *publisher),}
-    publishers.getOrCreate <- pr
-	p := <- pr.response
+	pr := &publisherRequest{request: pgChanName, response: make(chan *publisher)}
+	publishers.getOrCreate <- pr
+	p := <-pr.response
 	p.subscribe <- c
 	c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel "+pgChanName))
 	go c.writer()
@@ -229,7 +229,7 @@ func main() {
 			fmt.Println(err.Error())
 		}
 	}
-    go publishersDaemon()
+	go publishersDaemon()
 	listener = pq.NewListener(configString, 10*time.Second, time.Minute, reportProblem)
 	go pgListen()
 	fmt.Println("Listening")
