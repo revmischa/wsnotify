@@ -5,150 +5,62 @@ import (
 	"fmt"
 	"github.com/garyburd/go-websocket/websocket"
 	"github.com/lib/pq"
-	"io/ioutil"
-	"launchpad.net/goyaml"
 	"net/http"
 	"strings"
 	"time"
 )
 
-type client struct {
-	ws     websocket.Conn
-	send   chan []byte
-	pgChan string
-	done   chan bool
-}
+var listener *pq.Listener
+var db *sql.DB
 
-type publisher struct {
-	// Registered connections.
-	subscribers map[*client]bool
-
-	// Notifs
-	publish chan []byte
-
-	// Register requests from the connections.
-	subscribe chan *client
-
-	// Unregister requests from connections.
-	unsubscribe chan *client
-
-	name string
+var publishers = struct {
+	m           map[string]*publisher
+	subscribe   chan *subscribeRequest
+	get         chan *publisherRequest
+	unsubscribe chan *subscribeRequest
+}{
+	m:           make(map[string]*publisher),
+	subscribe:   make(chan *subscribeRequest),
+	get:         make(chan *publisherRequest),
+	unsubscribe: make(chan *subscribeRequest),
 }
 
 type publisherRequest struct {
-	request  string
+	chanName string
 	response chan *publisher
 }
 
-//I don't like globals
-//think about a way to get rid of this
-var publishers = struct {
-	m           map[string]*publisher
-	getOrCreate chan *publisherRequest
-	remove      chan string
-}{
-	m:           make(map[string]*publisher),
-	getOrCreate: make(chan *publisherRequest),
-	remove:      make(chan string),
+type subscribeRequest struct {
+	chanName string
+	c        *client
+	done     chan int
 }
 
 func publishersDaemon() {
 	for {
 		select {
-		case r := <-publishers.getOrCreate:
-			p, ok := publishers.m[r.request]
+		case r := <-publishers.get:
+			p := publishers.m[r.chanName]
+			r.response <- p
+		case r := <-publishers.subscribe:
+			p, ok := publishers.m[r.chanName]
 			if ok {
-				fmt.Println("think I found an existing publisher")
-				r.response <- p
+				p.subscribe <- r
 			} else {
-				newPub := newPublisher(r.request)
-				publishers.m[r.request] = newPub
-				listener.Listen(r.request)
-				r.response <- newPub
+				newPub := newPublisher(r.chanName)
+				publishers.m[r.chanName] = newPub
+				listener.Listen(r.chanName)
+				newPub.subscribe <- r
 			}
-		case k := <-publishers.remove:
-			delete(publishers.m, k)
-			listener.Unlisten(k)
-		}
-	}
-}
-
-var listener *pq.Listener
-var db *sql.DB
-
-func newPublisher(name string) *publisher {
-	p := publisher{
-		subscribers: make(map[*client]bool),
-		publish:     make(chan []byte),
-		subscribe:   make(chan *client),
-		unsubscribe: make(chan *client),
-		name:        name,
-	}
-	publishers.m[name] = &p
-	go p.run()
-
-	return &p
-}
-
-func (c *client) reader() {
-	for {
-		mt, p, err := c.ws.ReadMessage()
-		if err != nil {
-			fmt.Println("client read error: ", err.Error())
-			return
-		}
-		if mt == websocket.CloseMessage {
-			return
-		}
-
-		if mt == websocket.TextMessage {
-			db.Exec("SELECT pg_Notify($1, $2)", c.pgChan, string(p))
-		}
-		fmt.Println("type", mt, "message", p)
-	}
-}
-
-func (c *client) writer() {
-	defer fmt.Println("exiting client writer")
-	for {
-		select {
-		case message, ok := <-c.send:
-			if !ok {
-				// the channel's been closed
-				return
-			}
-			err := c.ws.WriteMessage(websocket.TextMessage, message)
-			if err != nil {
-				fmt.Println("Error writing " + string(message) + " to websocket: " + err.Error())
-				return
-			}
-		case <-time.After(20 * time.Second):
-			c.ws.WriteMessage(websocket.PingMessage, []byte(""))
-		}
-	}
-}
-
-func (p *publisher) run() {
-	running := true
-	for running {
-		select {
-		case c := <-p.subscribe:
-			p.subscribers[c] = true
-		case c := <-p.unsubscribe:
-			delete(p.subscribers, c)
-			close(c.send)
-			if len(p.subscribers) < 1 {
-				publishers.remove <- p.name
-				running = false
-			}
-		case m := <-p.publish:
-			for c := range p.subscribers {
-				select {
-				case c.send <- m:
-				default:
-					delete(p.subscribers, c)
-					close(c.send)
-					go c.ws.Close()
+		case r := <-publishers.unsubscribe:
+			listener.Unlisten(r.chanName)
+			p, ok := publishers.m[r.chanName]
+			if ok {
+				p.unsubscribe <- r
+				numClients := <-r.done
+                fmt.Println(numClients)
+				if numClients < 1 {
+					delete(publishers.m, r.chanName)
 				}
 			}
 		}
@@ -159,8 +71,14 @@ func pgListen() {
 	for notif := range listener.Notify {
 		fmt.Println(notif.Channel)
 		fmt.Println(notif.Extra)
-		if publishers.m[notif.Channel] != nil {
-			publishers.m[notif.Channel].publish <- []byte(notif.Extra)
+		pr := &publisherRequest{
+			chanName: notif.Channel,
+			response: make(chan *publisher),
+		}
+		publishers.get <- pr
+		pub := <-pr.response
+		if pr != nil {
+			pub.publish <- []byte(notif.Extra)
 		}
 	}
 
@@ -182,55 +100,36 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 	pgChanName := pathParts[len(pathParts)-1]
 	fmt.Println(pgChanName)
 	c := &client{*ws, make(chan []byte, 256), pgChanName, make(chan bool)}
-	pr := &publisherRequest{request: pgChanName, response: make(chan *publisher)}
-	publishers.getOrCreate <- pr
-	p := <-pr.response
-	p.subscribe <- c
+	sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
+	publishers.subscribe <- sr
+	<-sr.done
 	c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel "+pgChanName))
 	go c.writer()
 	defer func() {
-		p.unsubscribe <- c
+        sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int),}
+		publishers.unsubscribe <- sr
+		c.ws.Close()
 		fmt.Println("Exiting client connection")
 	}()
 	c.reader()
 }
 
-type DBconfig struct {
-	User     string
-	DBname   string
-	Port     string
-	Password string
-	Host     string
-}
-
 func main() {
-	var err error
-	configFile, err := ioutil.ReadFile("config.yaml")
+	config, err := GetConfig()
 	if err != nil {
-		configFile, err = ioutil.ReadFile("/etc/wsnotify/config.yaml")
-		if err != nil {
-			panic("could not find config file")
-		}
+		panic(err)
 	}
-	var config DBconfig
-	goyaml.Unmarshal(configFile, &config)
-	configString := "user=" + config.User + " dbname=" + config.DBname + " sslmode=disable"
-	if config.Host != "" {
-		configString = configString + " host=" + config.Host
-	}
-	if config.Password != "" {
-		configString = configString + " password=" + config.Password
-	}
-	db, err = sql.Open("postgres", configString)
+	configstr := ConfigString(config)
+	db, err = sql.Open("postgres", configstr)
 
 	reportProblem := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
-			fmt.Println("reportProblem error")
+			fmt.Println("PGListen error")
 			fmt.Println(err.Error())
 		}
 	}
 	go publishersDaemon()
-	listener = pq.NewListener(configString, 10*time.Second, time.Minute, reportProblem)
+	listener = pq.NewListener(configstr, 10*time.Second, time.Minute, reportProblem)
 	go pgListen()
 	fmt.Println("Listening")
 	http.HandleFunc("/wsnotify/", newClientHandler)
