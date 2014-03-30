@@ -1,4 +1,5 @@
-user: mleveck
-dbname: mw
-host: localhost 
+user: mwdev 
+dbname: mwdev
+host: ilduce.db
+password: VMGigq9315
 port: 11002

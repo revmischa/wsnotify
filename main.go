@@ -58,7 +58,7 @@ func publishersDaemon() {
 			if ok {
 				p.unsubscribe <- r
 				numClients := <-r.done
-				fmt.Println(numClients)
+                fmt.Println(numClients)
 				if numClients < 1 {
 					delete(publishers.m, r.chanName)
 				}
@@ -106,7 +106,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 	c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel "+pgChanName))
 	go c.writer()
 	defer func() {
-		sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
+        sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int),}
 		publishers.unsubscribe <- sr
 		c.ws.Close()
 		fmt.Println("Exiting client connection")
