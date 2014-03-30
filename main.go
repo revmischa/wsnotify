@@ -60,6 +60,7 @@ func publishersDaemon() {
 				numClients := <-r.done
 				fmt.Println(numClients)
 				if numClients < 1 {
+					listener.Unlisten(r.chanName)
 					delete(publishers.m, r.chanName)
 				}
 			}
