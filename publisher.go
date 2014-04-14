@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 type publisher struct {
 	// Registered connections.
 	subscribers map[*client]bool
@@ -37,10 +39,12 @@ func (p *publisher) run() {
 			p.subscribers[r.c] = true
 			r.done <- len(p.subscribers)
 		case r := <-p.unsubscribe:
+			fmt.Println("entering unsubscribe for" + p.name)
 			delete(p.subscribers, r.c)
 			close(r.c.send)
 			r.done <- len(p.subscribers)
 			if len(p.subscribers) < 1 {
+				fmt.Println("Setting running to false")
 				running = false
 			}
 		case m := <-p.publish:

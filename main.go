@@ -3,11 +3,12 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"github.com/garyburd/go-websocket/websocket"
-	"github.com/lib/pq"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/garyburd/go-websocket/websocket"
+	"github.com/lib/pq"
 )
 
 var listener *pq.Listener
@@ -53,13 +54,13 @@ func publishersDaemon() {
 				newPub.subscribe <- r
 			}
 		case r := <-publishers.unsubscribe:
-			listener.Unlisten(r.chanName)
 			p, ok := publishers.m[r.chanName]
 			if ok {
 				p.unsubscribe <- r
 				numClients := <-r.done
 				fmt.Println(numClients)
 				if numClients < 1 {
+					fmt.Print("unlistening")
 					listener.Unlisten(r.chanName)
 					delete(publishers.m, r.chanName)
 				}
