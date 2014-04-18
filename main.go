@@ -121,7 +121,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	syslogBackend, err := logging.NewSyslogBackend("wsnotify: ")
+	syslogBackend, err := logging.NewSyslogBackend("local0")
 	stdOutBackend := logging.NewLogBackend(os.Stderr, "", stdlog.LstdFlags|stdlog.Lshortfile)
 	if err != nil {
 		log.Fatal(err)
