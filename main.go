@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	stdlog "log"
+	stdsyslog "log/syslog"
 	"net/http"
 	"os"
 	"strings"
@@ -121,12 +122,16 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	syslogBackend, err := logging.NewSyslogBackend("local0")
+	syslog, err := stdsyslog.New(stdsyslog.LOG_LOCAL0|stdsyslog.LOG_DEBUG, "wsnotify")
+	if err != nil {
+		log.Fatal(err)
+	}
+	syslogBackend := logging.SyslogBackend{syslog}
 	stdOutBackend := logging.NewLogBackend(os.Stderr, "", stdlog.LstdFlags|stdlog.Lshortfile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	logging.SetBackend(syslogBackend, stdOutBackend)
+	logging.SetBackend(&syslogBackend, stdOutBackend)
 	config, err := GetConfig()
 	if err != nil {
 		log.Fatal(err)
