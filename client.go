@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
-	"github.com/garyburd/go-websocket/websocket"
 	"time"
+
+	"github.com/garyburd/go-websocket/websocket"
 )
 
 type client struct {
@@ -17,7 +17,7 @@ func (c *client) reader() {
 	for {
 		mt, p, err := c.ws.ReadMessage()
 		if err != nil {
-			fmt.Println("client read error: ", err.Error())
+			log.Error("client read error: ", err.Error())
 			return
 		}
 		if mt == websocket.CloseMessage {
@@ -27,12 +27,12 @@ func (c *client) reader() {
 		if mt == websocket.TextMessage {
 			db.Exec("SELECT pg_Notify($1, $2)", c.pgChan, string(p))
 		}
-		fmt.Println("type", mt, "message", p)
+		//fmt.Println("type", mt, "message", p)
 	}
 }
 
 func (c *client) writer() {
-	defer fmt.Println("exiting client writer")
+	defer log.Notice("exiting client writer")
 	for {
 		select {
 		case message, ok := <-c.send:
@@ -42,7 +42,7 @@ func (c *client) writer() {
 			}
 			err := c.ws.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
-				fmt.Println("Error writing " + string(message) + " to websocket: " + err.Error())
+				log.Error("Error writing " + string(message) + " to websocket: " + err.Error())
 				return
 			}
 		case <-time.After(20 * time.Second):

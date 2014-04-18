@@ -3,15 +3,19 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	stdlog "log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/garyburd/go-websocket/websocket"
 	"github.com/lib/pq"
+	"github.com/op/go-logging"
 )
 
 var listener *pq.Listener
+var log = logging.MustGetLogger("wsnotify")
 var db *sql.DB
 
 var publishers = struct {
@@ -58,9 +62,9 @@ func publishersDaemon() {
 			if ok {
 				p.unsubscribe <- r
 				numClients := <-r.done
-				fmt.Println(numClients)
+				log.Debug(string(numClients))
 				if numClients < 1 {
-					fmt.Print("unlistening")
+					log.Notice("unlistening" + r.chanName)
 					listener.Unlisten(r.chanName)
 					delete(publishers.m, r.chanName)
 				}
@@ -71,8 +75,8 @@ func publishersDaemon() {
 
 func pgListen() {
 	for notif := range listener.Notify {
-		fmt.Println(notif.Channel)
-		fmt.Println(notif.Extra)
+		log.Info("message recieved on " + notif.Channel)
+		log.Info(notif.Extra)
 		pr := &publisherRequest{
 			chanName: notif.Channel,
 			response: make(chan *publisher),
@@ -84,7 +88,7 @@ func pgListen() {
 		}
 	}
 
-	fmt.Printf("Lost database connection ?!")
+	log.Error("Lost database connection ?!")
 }
 
 func newClientHandler(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +97,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not a websocket handshake", 400)
 		return
 	} else if err != nil {
-		fmt.Println(err)
+		log.Error(err.Error())
 		return
 	}
 	path := r.URL.Path
@@ -111,23 +115,28 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
 		publishers.unsubscribe <- sr
 		c.ws.Close()
-		fmt.Println("Exiting client connection")
+		log.Notice("Exiting client connection")
 	}()
 	c.reader()
 }
 
 func main() {
+	syslogBackend, err := logging.NewSyslogBackend("wsnotify: ")
+	stdOutBackend := logging.NewLogBackend(os.Stderr, "", stdlog.LstdFlags|stdlog.Lshortfile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	logging.SetBackend(syslogBackend, stdOutBackend)
 	config, err := GetConfig()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	configstr := ConfigString(config)
 	db, err = sql.Open("postgres", configstr)
 
 	reportProblem := func(ev pq.ListenerEventType, err error) {
 		if err != nil {
-			fmt.Println("PGListen error")
-			fmt.Println(err.Error())
+			log.Error("PGListen error " + err.Error())
 		}
 	}
 	go publishersDaemon()
@@ -137,6 +146,6 @@ func main() {
 	http.HandleFunc("/wsnotify/", newClientHandler)
 	err = http.ListenAndServe(":"+config.Port, nil)
 	if err != nil {
-		panic("ListenAndServe: " + err.Error())
+		log.Fatal("ListenAndServe: " + err.Error())
 	}
 }
