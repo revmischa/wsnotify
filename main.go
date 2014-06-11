@@ -65,7 +65,7 @@ func publishersDaemon() {
 				numClients := <-r.done
 				log.Debug(string(numClients))
 				if numClients < 1 {
-					log.Notice("unlistening" + r.chanName)
+					log.Debug("Channel")
 					listener.Unlisten(r.chanName)
 					delete(publishers.m, r.chanName)
 				}
@@ -76,7 +76,7 @@ func publishersDaemon() {
 
 func pgListen() {
 	for notif := range listener.Notify {
-		log.Info("message recieved on " + notif.Channel)
+		log.Debug("message recieved")
 		//log.Info(notif.Extra)
 		pr := &publisherRequest{
 			chanName: notif.Channel,
@@ -116,7 +116,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
 		publishers.unsubscribe <- sr
 		c.ws.Close()
-		log.Notice("Exiting client connection")
+		log.Debug("Exiting client connection")
 	}()
 	c.reader()
 }

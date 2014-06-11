@@ -37,7 +37,7 @@ func (p *publisher) run() {
 			p.subscribers[r.c] = true
 			r.done <- len(p.subscribers)
 		case r := <-p.unsubscribe:
-			log.Debug("entering unsubscribe for" + p.name)
+			log.Debug("entering unsubscribe for channel")
 			delete(p.subscribers, r.c)
 			close(r.c.send)
 			r.done <- len(p.subscribers)
