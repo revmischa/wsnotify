@@ -77,7 +77,7 @@ func publishersDaemon() {
 func pgListen() {
 	for notif := range listener.Notify {
 		log.Info("message recieved on " + notif.Channel)
-		log.Info(notif.Extra)
+		//log.Info(notif.Extra)
 		pr := &publisherRequest{
 			chanName: notif.Channel,
 			response: make(chan *publisher),

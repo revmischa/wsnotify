@@ -27,7 +27,6 @@ func (c *client) reader() {
 		if mt == websocket.TextMessage {
 			db.Exec("SELECT pg_Notify($1, $2)", c.pgChan, string(p))
 		}
-		//fmt.Println("type", mt, "message", p)
 	}
 }
 
