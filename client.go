@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"time"
 
 	"github.com/garyburd/go-websocket/websocket"
@@ -17,7 +18,11 @@ func (c *client) reader() {
 	for {
 		mt, p, err := c.ws.ReadMessage()
 		if err != nil {
-			log.Error("client read error: ", err.Error())
+			if err == io.EOF {
+				log.Debug("client disconnect with EOF")
+			} else {
+				log.Error("client read error: ", err.Error())
+			}
 			return
 		}
 		if mt == websocket.CloseMessage {
@@ -31,7 +36,7 @@ func (c *client) reader() {
 }
 
 func (c *client) writer() {
-	defer log.Notice("exiting client writer")
+	defer log.Debug("exiting client writer")
 	for {
 		select {
 		case message, ok := <-c.send:

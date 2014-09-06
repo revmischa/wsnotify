@@ -77,7 +77,6 @@ func publishersDaemon() {
 func pgListen() {
 	for notif := range listener.Notify {
 		log.Debug("message recieved")
-		//log.Info(notif.Extra)
 		pr := &publisherRequest{
 			chanName: notif.Channel,
 			response: make(chan *publisher),
@@ -102,7 +101,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
-	fmt.Println(path)
+	log.Debug(path)
 	pathParts := strings.Split(path, "/")
 	pgChanName := pathParts[len(pathParts)-1]
 	fmt.Println(pgChanName)
