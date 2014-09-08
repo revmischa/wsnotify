@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/garyburd/go-websocket/websocket"
+	"github.com/gorilla/websocket"
 )
 
 type client struct {

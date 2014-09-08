@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/garyburd/go-websocket/websocket"
+	"github.com/gorilla/websocket"
 )
 
 func newClientHandler(w http.ResponseWriter, r *http.Request) {
