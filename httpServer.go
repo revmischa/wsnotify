@@ -39,7 +39,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 
 func runHTTPServer(config *DBconfig) {
 	var err error
-	http.HandleFunc("/wsnotify/", newClientHandler)
+	http.HandleFunc(config.ServerPath, newClientHandler)
 	if config.SSLKeyPath != "" && config.SSLKeyPath != "" {
 		err = http.ListenAndServeTLS(":"+config.Port, config.SSLCertPath, config.SSLKeyPath, nil)
 	} else {

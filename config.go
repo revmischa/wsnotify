@@ -15,6 +15,7 @@ type DBconfig struct {
 	Host        string
 	SSLCertPath string
 	SSLKeyPath  string
+	ServerPath  string
 }
 
 func GetConfig() (*DBconfig, error) {
