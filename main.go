@@ -5,12 +5,9 @@ import (
 	"fmt"
 	stdlog "log"
 	stdsyslog "log/syslog"
-	"net/http"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/garyburd/go-websocket/websocket"
 	"github.com/lib/pq"
 	"github.com/op/go-logging"
 )
@@ -91,35 +88,6 @@ func pgListen() {
 	log.Error("Lost database connection ?!")
 }
 
-func newClientHandler(w http.ResponseWriter, r *http.Request) {
-	ws, err := websocket.Upgrade(w, r.Header, nil, 1024, 1024)
-	if _, ok := err.(websocket.HandshakeError); ok {
-		http.Error(w, "Not a websocket handshake", 400)
-		return
-	} else if err != nil {
-		log.Error(err.Error())
-		return
-	}
-	path := r.URL.Path
-	log.Debug(path)
-	pathParts := strings.Split(path, "/")
-	pgChanName := pathParts[len(pathParts)-1]
-	fmt.Println(pgChanName)
-	c := &client{*ws, make(chan []byte, 256), pgChanName, make(chan bool)}
-	sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
-	publishers.subscribe <- sr
-	<-sr.done
-	c.ws.WriteMessage(websocket.TextMessage, []byte("now subscribed to channel "+pgChanName))
-	go c.writer()
-	defer func() {
-		sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
-		publishers.unsubscribe <- sr
-		c.ws.Close()
-		log.Debug("Exiting client connection")
-	}()
-	c.reader()
-}
-
 func main() {
 	syslog, err := stdsyslog.New(stdsyslog.LOG_LOCAL0|stdsyslog.LOG_DEBUG, "wsnotify")
 	if err != nil {
@@ -147,9 +115,5 @@ func main() {
 	listener = pq.NewListener(configstr, 10*time.Second, time.Minute, reportProblem)
 	go pgListen()
 	fmt.Println("Listening")
-	http.HandleFunc("/wsnotify/", newClientHandler)
-	err = http.ListenAndServe(":"+config.Port, nil)
-	if err != nil {
-		log.Fatal("ListenAndServe: " + err.Error())
-	}
+	runHTTPServer(config)
 }
