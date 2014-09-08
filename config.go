@@ -3,15 +3,18 @@ package main
 import (
 	"errors"
 	"io/ioutil"
+
 	"launchpad.net/goyaml"
 )
 
 type DBconfig struct {
-	User     string
-	DBname   string
-	Port     string
-	Password string
-	Host     string
+	User        string
+	DBname      string
+	Port        string
+	Password    string
+	Host        string
+	SSLCertPath string
+	SSLKeyPath  string
 }
 
 func GetConfig() (*DBconfig, error) {

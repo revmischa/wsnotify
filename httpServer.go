@@ -38,8 +38,13 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func runHTTPServer(config *DBconfig) {
+	var err error
 	http.HandleFunc("/wsnotify/", newClientHandler)
-	err := http.ListenAndServe(":"+config.Port, nil)
+	if config.SSLKeyPath != "" && config.SSLKeyPath != "" {
+		err = http.ListenAndServeTLS(":"+config.Port, config.SSLCertPath, config.SSLKeyPath, nil)
+	} else {
+		err = http.ListenAndServe(":"+config.Port, nil)
+	}
 	if err != nil {
 		log.Fatal("ListenAndServe: " + err.Error())
 	}
