@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io/ioutil"
+
 	"launchpad.net/goyaml"
 )
 
@@ -31,7 +32,13 @@ func GetConfig() (*DBconfig, error) {
 }
 
 func ConfigString(config *DBconfig) string {
-	configString := "user=" + config.User + " dbname=" + config.DBname + " sslmode=disable"
+	configString := "sslmode=disable"
+	if config.User != "" {
+		configString = configString + " user=" + config.User
+	}
+	if config.DBname != "" {
+		configString = configString + " dbname=" + config.DBname
+	}
 	if config.Host != "" {
 		configString = configString + " host=" + config.Host
 	}

@@ -1,4 +1,1 @@
-user: mleveck 
-dbname: mw
-host: localhost
-port: 11002
+port: 11000
