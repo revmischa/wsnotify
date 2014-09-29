@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/garyburd/go-websocket/websocket"
+	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
 	"github.com/op/go-logging"
 )
