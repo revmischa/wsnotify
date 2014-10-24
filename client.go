@@ -17,12 +17,8 @@ type client struct {
 func (c *client) reader() {
 	for {
 		mt, p, err := c.ws.ReadMessage()
-		if err != nil {
-			if err == io.EOF {
-				log.Debug("client disconnect with EOF")
-			} else {
-				log.Error("client read error: ", err.Error())
-			}
+		if err != nil && err != io.EOF {
+			log.Error("client read error: ", err.Error())
 			return
 		}
 		if mt == websocket.CloseMessage {
