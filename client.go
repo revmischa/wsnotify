@@ -32,7 +32,7 @@ func (c *client) reader() {
 }
 
 func (c *client) writer() {
-	defer log.Debug("exiting client writer")
+	//defer log.Debug("exiting client writer")
 	for {
 		select {
 		case message, ok := <-c.send:

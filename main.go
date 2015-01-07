@@ -63,9 +63,8 @@ func publishersDaemon() {
 			if ok {
 				p.unsubscribe <- r
 				numClients := <-r.done
-				log.Debug(string(numClients))
+				//log.Debug(string(numClients))
 				if numClients < 1 {
-					log.Debug("Channel")
 					listener.Unlisten(r.chanName)
 					delete(publishers.m, r.chanName)
 				}
@@ -76,7 +75,7 @@ func publishersDaemon() {
 
 func pgListen() {
 	for notif := range listener.Notify {
-		log.Debug("message recieved")
+		//log.Debug("message recieved")
 		pr := &publisherRequest{
 			chanName: notif.Channel,
 			response: make(chan *publisher),
@@ -101,7 +100,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
-	log.Debug(path)
+	//log.Debug(path)
 	pathParts := strings.Split(path, "/")
 	pgChanName := pathParts[len(pathParts)-1]
 	fmt.Println(pgChanName)
@@ -115,7 +114,7 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 		sr := &subscribeRequest{chanName: pgChanName, c: c, done: make(chan int)}
 		publishers.unsubscribe <- sr
 		c.ws.Close()
-		log.Debug("Exiting client connection")
+		//log.Debug("Exiting client connection")
 	}()
 	c.reader()
 }
