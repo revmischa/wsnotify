@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io/ioutil"
 
-	"launchpad.net/goyaml"
+	"gopkg.in/yaml.v2"
 )
 
 type DBconfig struct {
@@ -24,7 +24,7 @@ func GetConfig() (*DBconfig, error) {
 		}
 	}
 	var config DBconfig
-	err = goyaml.Unmarshal(configFile, &config)
+	err = yaml.Unmarshal(configFile, &config)
 	if err != nil {
 		return nil, err
 	}
