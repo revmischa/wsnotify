@@ -42,6 +42,7 @@ type subscribeRequest struct {
 	done     chan int
 }
 
+// function handles the channel connections
 func publishersDaemon() {
 	for {
 		select {
@@ -73,6 +74,7 @@ func publishersDaemon() {
 	}
 }
 
+// function to get notification from PG 
 func pgListen() {
 	for notif := range listener.Notify {
 		//log.Debug("message recieved")
@@ -90,6 +92,7 @@ func pgListen() {
 	log.Error("Lost database connection ?!")
 }
 
+// this function subscribs to channel , the channel send by application like pandapops
 func newClientHandler(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Upgrade(w, r, nil, 1024, 1024)
 	if _, ok := err.(websocket.HandshakeError); ok {
@@ -120,20 +123,26 @@ func newClientHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
 	syslog, err := stdsyslog.New(stdsyslog.LOG_LOCAL0|stdsyslog.LOG_DEBUG, "wsnotify")
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	syslogBackend := logging.SyslogBackend{syslog}
 	stdOutBackend := logging.NewLogBackend(os.Stderr, "", stdlog.LstdFlags|stdlog.Lshortfile)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	logging.SetBackend(&syslogBackend, stdOutBackend)
 	config, err := GetConfig()
+
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// connect to PG
 	configstr := ConfigString(config)
 	db, err = sql.Open("postgres", configstr)
 
@@ -142,11 +151,19 @@ func main() {
 			log.Error("PGListen error " + err.Error())
 		}
 	}
+
+	// create publisher channel
 	go publishersDaemon()
+
 	listener = pq.NewListener(configstr, 10*time.Second, time.Minute, reportProblem)
+
+	// start listening to PG
 	go pgListen()
-	fmt.Println("Listening")
+
+	fmt.Println("Listening")   // bogus
+
 	http.HandleFunc("/wsnotify/", newClientHandler)
+
 	err = http.ListenAndServe(":"+config.Port, nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: " + err.Error())

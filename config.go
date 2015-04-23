@@ -1,3 +1,5 @@
+// this package reads config.yml
+
 package main
 
 import (
@@ -15,6 +17,7 @@ type DBconfig struct {
 	Host     string
 }
 
+// find and read config.yml
 func GetConfig() (*DBconfig, error) {
 	configFile, err := ioutil.ReadFile("config.yaml")
 	if err != nil {
@@ -31,6 +34,7 @@ func GetConfig() (*DBconfig, error) {
 	return &config, nil
 }
 
+// grab data from config.yaml and build a connection string for PG
 func ConfigString(config *DBconfig) string {
 	configString := "sslmode=disable"
 	if config.User != "" {
