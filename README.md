@@ -17,7 +17,7 @@ Asynchronous notification "virtual" with payload "This is the payload" received 
 WSNotify is a websocket server. Clients can connect and request to listen on a channel, and can also post events. It essentially is a push notification system using PostgreSQL as the transport. This makes it easy to push messages from other applications directly to any connected clients, in publish-subscribe style.
 
 ## Configuration
-Copy [config.yaml] to /etc/wsnotify/config.yaml and edit it to select a port to listen on and your database connection info.
+Copy config.yaml to /etc/wsnotify/config.yaml and edit it to select a port to listen on and your database connection info.
 
 ## Postgres clients
 To send and receive asynchronous messages through Postgres you can use any Postgres client library, as basically all of them support this capability. You can also use libpq and `select()` for C applications [demo here](https://github.com/revmischa/pgnotify-demos/blob/master/pglisten.c).
